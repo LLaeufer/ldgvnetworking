@@ -114,6 +114,10 @@ handleClient activeCons mvar clientlist clientsocket hdl ownport message deseria
                 IntroduceClient userid clientport synname syntype -> do
                     serverid <- RandomID.newRandomID
                     newpeer <- newNetworkConnection userid serverid clientHostaddress clientport userid serverid
+                    
+                    -- Setup threaded message sending
+                    forkIO $ NClient.iterateOnSendQueue activeCons newpeer
+
                     NC.sendResponse hdl (OkayIntroduce serverid)
                     repserial <- NSerialize.serialize $ OkayIntroduce serverid
                     recievedNetLog message $ "    Response to "++ userid ++ ": " ++ repserial
@@ -209,6 +213,10 @@ replaceVChanSerial activeCons mvar input = modifyVChans (handleSerial activeCons
         handleSerial activeCons mvar input = case input of
             VChanSerial r w p o c -> do
                 networkconnection <- createNetworkConnection r w p o c
+
+                -- Setup threded message sending
+                forkIO $ NClient.iterateOnSendQueue activeCons networkconnection
+
                 ncmap <- MVar.takeMVar mvar
                 MVar.putMVar mvar $ Map.insert p networkconnection ncmap
                 used<- MVar.newEmptyMVar
@@ -218,7 +226,7 @@ replaceVChanSerial activeCons mvar input = modifyVChans (handleSerial activeCons
 
 recieveValue :: VChanConnections -> NMC.ActiveConnections -> NetworkConnection Value Message -> String -> IO Value
 recieveValue vchanconsvar activeCons networkconnection ownport = do
-    recieveValueInternal 0 vchanconsvar activeCons networkconnection ownport
+    recieveValueInternal 1000 vchanconsvar activeCons networkconnection ownport
     where
         recieveValueInternal :: Int -> VChanConnections -> NMC.ActiveConnections -> NetworkConnection Value Message -> String -> IO Value
         recieveValueInternal count vchanconsvar activeCons networkconnection ownport = do
@@ -231,7 +239,7 @@ recieveValue vchanconsvar activeCons networkconnection ownport = do
                     -- msgCount <- DC.unreadMessageStart $ ncRead networkconnection
                     connectionState <- MVar.readMVar $ ncConnectionState networkconnection
                     case connectionState of
-                        Connected {} -> NClient.sendNetworkMessage activeCons networkconnection (AcknowledgeValue (ncOwnUserID networkconnection) $ snd unclean) $ -1
+                        Connected {} -> void $ NClient.sendNetworkMessage activeCons networkconnection (AcknowledgeValue (ncOwnUserID networkconnection) $ snd unclean) $ -1
                         Emulated {} -> do
                             vchancons <- MVar.readMVar vchanconsvar
                             let ownid = ncOwnUserID networkconnection
@@ -240,18 +248,18 @@ recieveValue vchanconsvar activeCons networkconnection ownport = do
                                 Just partner -> do
                                     -- NB.serialize (ncWrite partner) >>= \x -> Config.traceNetIO $ "Emulated "++ show unclean ++ " before acknowlegment: " ++ show x
                                     NB.updateAcknowledgements (ncWrite partner) $ snd unclean
-                                    return True
-                                _ -> Config.traceNetIO "Something went wrong when acknowleding value of emulated connection" >> return True
-                        _ -> return True
+                                    -- return True
+                                _ -> Config.traceNetIO "Something went wrong when acknowleding value of emulated connection" -- >> return True
+                        _ -> return () -- True
 
                     return val
                 Nothing -> if count == 0 then do
                         msgCount <- NB.getNextOffset $ ncRead networkconnection
                         connectionState <- MVar.readMVar $ ncConnectionState networkconnection
                         case connectionState of
-                            Connected {} -> NClient.sendNetworkMessage activeCons networkconnection (RequestValue (ncOwnUserID networkconnection) msgCount) 0
-                            _ -> return True
-                        recieveValueInternal 100 vchanconsvar activeCons networkconnection ownport
+                            Connected {} -> NClient.sendNetworkMessageThreaded activeCons networkconnection (RequestValue (ncOwnUserID networkconnection) msgCount) 0
+                            _ -> return () -- True
+                        recieveValueInternal 2000 vchanconsvar activeCons networkconnection ownport
                         else do
                             threadDelay 5000
                             recieveValueInternal (count-1) vchanconsvar activeCons networkconnection ownport

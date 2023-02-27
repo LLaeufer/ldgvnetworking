@@ -18,6 +18,7 @@ import Control.Monad
 import qualified Networking.NetworkingMethod.NetworkingMethodCommon as NMC
 import qualified Control.Concurrent.SSem as SSem
 import qualified Networking.NetworkConnection as NCon
+import qualified Networking.NetworkBuffer as NC
 
 
 newtype ClientException = NoIntroductionException String
@@ -51,18 +52,17 @@ sendValueInternal threaded vchanconsmvar activeCons networkconnection val ownpor
             let hostname = csHostname connectionstate
             let port = csPort connectionstate
             --waitTillReadyToSend val
-            setRedirectRequests vchanconsmvar hostname port ownport val
+            setRedirectRequests vchanconsmvar activeCons hostname port ownport val
             Config.traceNetIO $ "Redirected: " ++ show val
             valcleaned <- serializeVChan val
             Config.traceNetIO $ "Serialized: " ++ show val
             messagesCount <- NB.write (ncWrite networkconnection) valcleaned
             Config.traceNetIO $ "Wrote to Buffer: " ++ show val
             let msg = NewValue (ncOwnUserID networkconnection) messagesCount valcleaned
-            let cmd = tryToSendNetworkMessage activeCons networkconnection hostname port msg resendOnError
             result <- if threaded then do
-                forkIO $ void cmd
+                NB.write (ncSendQueue networkconnection) (hostname, port, msg, resendOnError)
                 return True
-                else cmd
+                else tryToSendNetworkMessage activeCons networkconnection hostname port msg resendOnError
             Config.traceNetIO $ "Sent message: " ++ show val
             return result
 
@@ -85,15 +85,25 @@ channelReadyToSend = searchVChans handleChannel True (&&)
             VChan nc used -> NB.isAllAcknowledged $ ncWrite nc
             _ -> return True
 
-sendNetworkMessage :: NMC.ActiveConnections -> NetworkConnection Value Message -> Message -> Int -> IO Bool
-sendNetworkMessage activeCons networkconnection message resendOnError = do
+sendNetworkMessageInternal :: Bool -> NMC.ActiveConnections -> NetworkConnection Value Message -> Message -> Int -> IO Bool
+sendNetworkMessageInternal threaded activeCons networkconnection message resendOnError = do
     connectionstate <- MVar.readMVar $ ncConnectionState networkconnection
     case connectionstate of
         Emulated {} -> return True
         _ -> do
             let hostname = csHostname connectionstate
             let port = csPort connectionstate
-            tryToSendNetworkMessage activeCons networkconnection hostname port message resendOnError
+            if threaded then do
+                NB.write (ncSendQueue networkconnection) (hostname, port, message, resendOnError)
+                return True
+            else
+                tryToSendNetworkMessage activeCons networkconnection hostname port message resendOnError
+
+sendNetworkMessage :: NMC.ActiveConnections -> NetworkConnection Value Message -> Message -> Int -> IO Bool
+sendNetworkMessage = sendNetworkMessageInternal False
+
+sendNetworkMessageThreaded :: NMC.ActiveConnections -> NetworkConnection Value Message -> Message -> Int -> IO ()
+sendNetworkMessageThreaded ac nc m i = void $ sendNetworkMessageInternal True ac nc m i
 
 tryToSendNetworkMessage :: NMC.ActiveConnections -> NetworkConnection Value Message -> String -> String -> Message -> Int -> IO Bool
 tryToSendNetworkMessage activeCons networkconnection hostname port message resendOnError = do
@@ -154,7 +164,7 @@ printConErr hostname port err = do
     return False
 
 
-initialConnect :: NMC.ActiveConnections -> MVar.MVar (Map.Map String (NetworkConnection Value Message)) -> String -> String -> String -> (Syntax.Type, Syntax.Type) -> IO Value
+initialConnect :: NMC.ActiveConnections -> VChanConnections  -> String -> String -> String -> (Syntax.Type, Syntax.Type) -> IO Value
 initialConnect activeCons mvar hostname port ownport syntype= do
     mbycon <- NC.waitForConversation activeCons hostname port 1000 100  -- This should be 10000 100 in the real world, expecting just a 100ms ping in the real world might be a little aggressive.
 
@@ -172,6 +182,10 @@ initialConnect activeCons mvar hostname port ownport syntype= do
                         Config.traceNetIO $ "    Over: " ++ hostname ++ ":" ++ port
                         Config.traceNetIO $ "    Message: " ++ msgserial
                         newConnection <- newNetworkConnection introductionanswer ownuserid hostname port introductionanswer ownuserid
+                        
+                        -- Setup threaded message sending
+                        forkIO $ iterateOnSendQueue activeCons newConnection
+
                         networkconnectionmap <- MVar.takeMVar mvar
                         let newNetworkconnectionmap = Map.insert introductionanswer newConnection networkconnectionmap
                         MVar.putMVar mvar newNetworkconnectionmap
@@ -193,11 +207,11 @@ initialConnect activeCons mvar hostname port ownport syntype= do
             threadDelay 1000000
             initialConnect activeCons mvar hostname port ownport syntype
 
-setRedirectRequests :: VChanConnections -> String -> String -> String -> Value -> IO Bool
-setRedirectRequests vchanconmvar newhost newport ownport = searchVChans (handleVChan vchanconmvar newhost newport ownport) True (&&)
+setRedirectRequests :: VChanConnections -> NMC.ActiveConnections -> String -> String -> String -> Value -> IO Bool
+setRedirectRequests vchanconmvar activeconnections newhost newport ownport = searchVChans (handleVChan vchanconmvar activeconnections newhost newport ownport) True (&&)
     where
-        handleVChan ::  VChanConnections -> String -> String -> String -> Value -> IO Bool
-        handleVChan vchanconmvar newhost newport ownport input = case input of
+        handleVChan ::  VChanConnections -> NMC.ActiveConnections -> String -> String -> String -> Value -> IO Bool
+        handleVChan vchanconmvar activeconnections newhost newport ownport input = case input of
             VChan nc _ -> do
                 Config.traceNetIO $ "Trying to set RedirectRequest for " ++ ncPartnerUserID nc ++ " to " ++ newhost ++ ":" ++ newport
 
@@ -217,6 +231,9 @@ setRedirectRequests vchanconmvar newhost newport ownport = searchVChans (handleV
                                     MVar.putMVar (ncConnectionState nc) $ RedirectRequest "" ownport newhost newport partConID ownConID confirmed -- Setting this to 127.0.0.1 is a temporary hack
                                     oldconectionstatePartner <- MVar.takeMVar $ ncConnectionState partner
                                     MVar.putMVar (ncConnectionState partner) $ Connected newhost newport partConID ownConID confirmed
+
+                                    -- Setup threaded sending for partner
+                                    void $ forkIO $ iterateOnSendQueue activeconnections partner 
                                 Nothing -> do
                                     MVar.putMVar (ncConnectionState nc) oldconnectionstate
                                     Config.traceNetIO "Error occured why getting the linked emulated channel"
@@ -237,9 +254,14 @@ serializeVChan = modifyVChans handleVChan
         handleVChan :: Value -> IO Value
         handleVChan input = case input of
             VChan nc _-> do
+                waitTillEmpty nc
                 (r, ro, rl, w, wo, wl, pid, oid, h, p, partConID) <- serializeNetworkConnection nc
                 return $ VChanSerial (r, ro, rl) (w, wo, wl) pid oid (h, p, partConID)
             _ -> return input
+        waitTillEmpty :: NetworkConnection Value Message -> IO ()
+        waitTillEmpty nc = do
+            empty <- NC.isEmpty $ ncSendQueue nc
+            unless empty $ waitTillEmpty nc
 
 sendDisconnect :: NMC.ActiveConnections -> MVar.MVar (Map.Map String (NetworkConnection Value Message)) -> IO ()
 sendDisconnect ac mvar = do
@@ -258,6 +280,7 @@ sendDisconnect ac mvar = do
         sendDisconnectNetworkConnection :: NMC.ActiveConnections -> NetworkConnection Value Message -> IO Bool
         sendDisconnectNetworkConnection ac con = do
             let writeVals = ncWrite con
+            let sendQ = ncSendQueue con
             connectionState <- MVar.readMVar $ ncConnectionState con
             -- unreadVals <- DC.unreadMessageStart writeVals
             -- lengthVals <- DC.countMessages writeVals
@@ -266,7 +289,9 @@ sendDisconnect ac mvar = do
             -- NB.isAllAcknowledged writeVals >>= Config.traceNetIO . show
             case connectionState of
                 Connected host port _ _ _ -> do
-                    ret <- NB.isAllAcknowledged writeVals
+                    allAck <- NB.isAllAcknowledged writeVals
+                    allSend <- NB.isEmpty sendQ
+                    let ret = allAck && allSend
                     if ret then do
                         sent <- catch (sendNetworkMessage ac con (Disconnect $ ncOwnUserID con) $ -1) (\x -> printConErr host port x >> return True)
                         when sent $ NCon.disconnectFromPartner con  -- This should cause a small speedup
