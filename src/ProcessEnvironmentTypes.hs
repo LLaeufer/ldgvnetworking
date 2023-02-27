@@ -30,7 +30,7 @@ instance Show FuncType where
 
 type ServerSocket = (MVar.MVar [(String, (Type, Type))], String)
 
-type VChanConnections = MVar.MVar (Map.Map String (NCon.NetworkConnection Value))
+type VChanConnections = MVar.MVar (Map.Map String (NCon.NetworkConnection Value Message))
 
 type ValueRepr = String
 
@@ -41,7 +41,7 @@ data Value
   | VInt Int
   | VDouble Double
   | VString String
-  | VChan (NCon.NetworkConnection Value) (MVar.MVar Bool)
+  | VChan (NCon.NetworkConnection Value Message) (MVar.MVar Bool)
   | VChanSerial ([Value], Int, Int) ([Value], Int, Int) String String (String, String, String)
   | VSend Value
   | VPair Value Value -- pair of ids that map to two values
@@ -218,3 +218,44 @@ instance Subtypeable GType where
   isSubtypeOf GDouble GDouble = True
   isSubtypeOf GString GString = True
   isSubtypeOf _ _ = False
+
+type UserID = String
+type Hostname = String
+type Port = String
+type ConversationID = String
+type ConnectionID = String
+
+data Message
+    = IntroduceClient UserID Port Type Type
+    | NewValue UserID Int Value
+    | RequestValue UserID Int
+    | AcknowledgeValue UserID Int
+    | NewPartnerAddress UserID Port ConnectionID
+    | AcknowledgePartnerAddress UserID ConnectionID
+    | Disconnect UserID
+    | AcknowledgeDisconnect UserID -- Vielleicht brauchen wir das nicht mal sehen
+    deriving Eq
+
+data Response
+    = Redirect Hostname Port
+    | Okay
+    | OkayIntroduce UserID
+    | Wait
+    | Error
+
+data ConversationSession
+    = ConversationMessage ConversationID Message
+    | ConversationResponse ConversationID Response
+    | ConversationCloseAll
+
+
+getUserID :: Message -> String
+getUserID = \case
+    IntroduceClient p _ _ _ -> p
+    NewValue p _ _ -> p
+    RequestValue p _ -> p
+    AcknowledgeValue p _ -> p
+    NewPartnerAddress p _ _ -> p
+    AcknowledgePartnerAddress p _ -> p 
+    Disconnect p -> p
+    AcknowledgeDisconnect p -> p

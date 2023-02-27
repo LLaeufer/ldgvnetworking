@@ -10,7 +10,6 @@ import Control.Concurrent
 import Control.Monad
 import Control.Exception
 
-import Networking.Messages
 import Networking.NetworkConnection
 import Networking.RandomID
 import qualified Syntax
@@ -24,7 +23,7 @@ type ResponseMapMVar = MVar.MVar (Map.Map String (String, Response))
 
 data Conversation = Conversation {convID :: String, convHandle :: Stateless.Conversation, convRespMap :: ResponseMapMVar, convSending :: SSem.SSem}
 
-type ConnectionHandler = ActiveConnectionsFast -> MVar.MVar (Map.Map String (NetworkConnection Value)) -> MVar.MVar [(String, (Syntax.Type, Syntax.Type))] -> (Socket, SockAddr) -> Conversation -> String -> String -> Message -> IO ()
+type ConnectionHandler = ActiveConnectionsFast -> MVar.MVar (Map.Map String (NetworkConnection Value Message)) -> MVar.MVar [(String, (Syntax.Type, Syntax.Type))] -> (Socket, SockAddr) -> Conversation -> String -> String -> Message -> IO ()
 
 sendMessage ::  Conversation -> Message -> IO ()
 sendMessage conv value = SSem.withSem (convSending conv) $ Stateless.sendMessage (convHandle conv) (ConversationMessage (convID conv) value)
@@ -163,14 +162,14 @@ acceptConversations ac connectionhandler port socketsmvar vchanconnections = do
             forkIO $ acceptClients activeCons connectionhandler vchanconnections clientlist sock $ show port
             return clientlist
 
-        acceptClients :: ActiveConnectionsFast -> ConnectionHandler -> MVar.MVar (Map.Map String (NetworkConnection Value)) -> MVar.MVar [(String, (Syntax.Type, Syntax.Type))] -> Socket -> String -> IO ()
+        acceptClients :: ActiveConnectionsFast -> ConnectionHandler -> MVar.MVar (Map.Map String (NetworkConnection Value Message)) -> MVar.MVar [(String, (Syntax.Type, Syntax.Type))] -> Socket -> String -> IO ()
         acceptClients activeCons connectionhandler mvar clientlist socket ownport = do
             clientsocket <- accept socket
 
             forkIO $ acceptClient activeCons connectionhandler mvar clientlist clientsocket ownport
             acceptClients activeCons connectionhandler mvar clientlist socket ownport
 
-        acceptClient :: ActiveConnectionsFast -> ConnectionHandler -> MVar.MVar (Map.Map String (NetworkConnection Value)) -> MVar.MVar [(String, (Syntax.Type, Syntax.Type))] -> (Socket, SockAddr) -> String -> IO ()
+        acceptClient :: ActiveConnectionsFast -> ConnectionHandler -> MVar.MVar (Map.Map String (NetworkConnection Value Message)) -> MVar.MVar [(String, (Syntax.Type, Syntax.Type))] -> (Socket, SockAddr) -> String -> IO ()
         acceptClient activeCons connectionhandler mvar clientlist clientsocket ownport = do
             hdl <- Stateless.getHandleFromSocket $ fst clientsocket
             let statelessConv = (hdl, clientsocket)

@@ -70,7 +70,6 @@ library
       Networking.Buffer
       Networking.Client
       Networking.Common
-      Networking.Messages
       Networking.NetworkBuffer
       Networking.NetworkConnection
       Networking.NetworkingMethod.Fast

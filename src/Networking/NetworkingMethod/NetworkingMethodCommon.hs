@@ -4,7 +4,7 @@ import GHC.IO.Handle
 import qualified Control.Concurrent.Chan as Chan
 import qualified Control.Concurrent.MVar as MVar
 import qualified Data.Map as Map
-import Networking.Messages
+import ProcessEnvironmentTypes
 import qualified Control.Concurrent.SSem as SSem
 import Network.Socket
 

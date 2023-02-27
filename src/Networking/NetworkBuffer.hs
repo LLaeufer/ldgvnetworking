@@ -63,7 +63,10 @@ getNextOffset :: NetworkBuffer a -> IO Int
 getNextOffset = readMVar . bufferOffset
 
 isAllAcknowledged :: NetworkBuffer a -> IO Bool
-isAllAcknowledged nb = do
+isAllAcknowledged = isEmpty
+
+isEmpty :: NetworkBuffer a -> IO Bool
+isEmpty nb = do
     mbyBuffer <- tryReadBuffer $ buffer nb
     return $ Data.Maybe.isNothing mbyBuffer
 

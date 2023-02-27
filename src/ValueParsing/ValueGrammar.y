@@ -10,7 +10,6 @@ import Syntax
 import ProcessEnvironmentTypes
 import ValueParsing.ValueTokens (T(..))
 import qualified ValueParsing.ValueTokens as T
-import Networking.Messages
 }
 
 %monad { T.Alex }

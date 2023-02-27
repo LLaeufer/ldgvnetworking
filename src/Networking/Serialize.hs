@@ -10,7 +10,6 @@ import Kinds
 import Data.Set
 import Control.Exception
 import ProcessEnvironmentTypes
-import Networking.Messages
 import qualified Networking.NetworkBuffer as NB
 import qualified Networking.NetworkConnection as NCon 
 import qualified Data.Maybe

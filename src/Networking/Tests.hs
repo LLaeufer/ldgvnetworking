@@ -3,7 +3,6 @@ module Networking.Tests where
 import Networking.Assert
 import Networking.Buffer
 import Networking.NetworkBuffer
-import ProcessEnvironmentTypes
 
 test = testBuffer >> testNetworkBuffer
 
