@@ -261,7 +261,7 @@ serializeVChan = modifyVChans handleVChan
         waitTillEmpty :: NetworkConnection Value Message -> IO ()
         waitTillEmpty nc = do
             empty <- NC.isEmpty $ ncSendQueue nc
-            unless empty $ waitTillEmpty nc
+            unless empty $ threadDelay 5000 >> waitTillEmpty nc
 
 sendDisconnect :: NMC.ActiveConnections -> MVar.MVar (Map.Map String (NetworkConnection Value Message)) -> IO ()
 sendDisconnect ac mvar = do
