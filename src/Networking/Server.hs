@@ -239,7 +239,7 @@ recieveValue vchanconsvar activeCons networkconnection ownport = do
                     -- msgCount <- DC.unreadMessageStart $ ncRead networkconnection
                     connectionState <- MVar.readMVar $ ncConnectionState networkconnection
                     case connectionState of
-                        Connected {} -> void $ NClient.sendNetworkMessage activeCons networkconnection (AcknowledgeValue (ncOwnUserID networkconnection) $ snd unclean) $ -1
+                        Connected {} -> void $ NClient.sendNetworkMessageThreaded activeCons networkconnection (AcknowledgeValue (ncOwnUserID networkconnection) $ snd unclean) $ -1
                         Emulated {} -> do
                             vchancons <- MVar.readMVar vchanconsvar
                             let ownid = ncOwnUserID networkconnection
