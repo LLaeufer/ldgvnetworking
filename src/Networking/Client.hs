@@ -303,9 +303,11 @@ sendDisconnect ac mvar = do
 
 iterateOnSendQueue :: NMC.ActiveConnections -> NetworkConnection Value Message -> IO ()
 iterateOnSendQueue activecons nc = do
-    mbyPkg <- NB.tryTake $ ncSendQueue nc
+    mbyPkg <- NB.tryGetAtNB (ncSendQueue nc) 0
     case mbyPkg of
-        Just ((hostname, port, msg, resend), count) -> void $ tryToSendNetworkMessage activecons nc hostname port msg resend
+        Just (hostname, port, msg, resend) -> do 
+            void $ tryToSendNetworkMessage activecons nc hostname port msg resend
+            NB.tryTake $ ncSendQueue nc
         Nothing -> threadDelay 5000
     iterateOnSendQueue activecons nc
 
