@@ -307,7 +307,7 @@ iterateOnSendQueue activecons nc = do
     case mbyPkg of
         Just (hostname, port, msg, resend) -> do 
             void $ tryToSendNetworkMessage activecons nc hostname port msg resend
-            NB.tryTake $ ncSendQueue nc
+            void $ NB.tryTake $ ncSendQueue nc
         Nothing -> threadDelay 5000
     iterateOnSendQueue activecons nc
 
