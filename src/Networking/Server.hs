@@ -257,7 +257,7 @@ recieveValue vchanconsvar activeCons networkconnection ownport = do
                         msgCount <- NB.getNextOffset $ ncRead networkconnection
                         connectionState <- MVar.readMVar $ ncConnectionState networkconnection
                         case connectionState of
-                            Connected {} -> NClient.sendNetworkMessageThreaded activeCons networkconnection (RequestValue (ncOwnUserID networkconnection) msgCount) 0
+                            Connected {} -> void $ NClient.sendNetworkMessage activeCons networkconnection (RequestValue (ncOwnUserID networkconnection) msgCount) 0
                             _ -> return () -- True
                         recieveValueInternal 2000 vchanconsvar activeCons networkconnection ownport
                         else do

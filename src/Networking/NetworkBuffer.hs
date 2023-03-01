@@ -59,6 +59,9 @@ tryTake nb = SSem.withSem (working nb) $ modifyMVar (bufferOffset nb) (\offset -
         Nothing -> return (offset, Nothing)
     )
 
+waitAndReadNext :: NetworkBuffer a -> IO a
+waitAndReadNext = readBuffer . buffer
+
 getNextOffset :: NetworkBuffer a -> IO Int
 getNextOffset = readMVar . bufferOffset
 

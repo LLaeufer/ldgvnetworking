@@ -261,7 +261,7 @@ interpretApp _ (VSend v@(VChan cc usedmvar)) w = do
     socketsraw <- liftIO $ MVar.readMVar sockets
     let port = show $ head $ Map.keys socketsraw
     C.traceNetIO $ "Trying to send: " ++ show w
-    liftIO $  NClient.sendValue vchanconnections activeConnections cc w port (-1)
+    liftIO $  NClient.sendValueThreaded vchanconnections activeConnections cc w port (-1)
     C.traceNetIO $ "Sent: " ++ show w
     -- Disable old VChan
     liftIO $ disableOldVChan v
